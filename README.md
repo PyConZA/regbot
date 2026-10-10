@@ -82,6 +82,29 @@ Then start the server with
 
 > `uv run python -m regbot`
 
+## YouTube broadcast setup script
+
+`regbot/scripts/create_youtube_broadcasts.py` creates one YouTube live
+broadcast and one dedicated live stream per talk from the Wafer schedule ICS
+feed, binds them, and adds each broadcast to `YOUTUBE_PLAYLIST` (the playlist
+the bot reads). Per-talk settings live in `regbot/scripts/youtube_template.toml`,
+and the title/description text in `regbot/scripts/title.j2` /
+`description.j2`. A state file (`.youtube_state.json`) makes re-runs
+idempotent: changed talks are updated, new talks created.
+
+```bash
+# See what would be created (needs only WAFER_BASE_URL / WAFER_ICS_ENDPOINT):
+uv run python regbot/scripts/create_youtube_broadcasts.py --dry-run
+
+# Create / update broadcasts and write youtube_stream_keys.csv for the
+# streaming team (needs the full bot environment incl. YOUTUBE_PLAYLIST and
+# a valid .google_client_credentials in the current directory):
+uv run python regbot/scripts/create_youtube_broadcasts.py
+
+# Delete everything previously created:
+uv run python regbot/scripts/create_youtube_broadcasts.py --reset
+```
+
 ## Development
 
 Install dev dependencies with

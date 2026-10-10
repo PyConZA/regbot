@@ -1,0 +1,32 @@
+# Static template applied to every YouTube broadcast and stream created by
+# create_youtube_broadcasts.py. Edit values here; no code changes needed.
+
+[filter]
+# Schedule events whose name contains any of these (case-insensitive) are
+# skipped. Check `--dry-run` output against the real Wafer schedule and adjust.
+exclude_keywords = ["break", "lunch", "tea", "registration"]
+
+[broadcast.status]
+# "public", "unlisted" or "private". Start unlisted/private and flip to public
+# closer to the conference (in YouTube Studio, or re-run after editing here and
+# manually update status for existing broadcasts).
+privacyStatus = "unlisted"
+selfDeclaredMadeForKids = false
+
+[broadcast.contentDetails]
+# With auto start/stop, the broadcast goes live when its stream key starts
+# ingesting and ends when ingestion stops.
+enableAutoStart = true
+enableAutoStop = true
+enableDvr = true
+recordFromStart = true
+enableClosedCaptions = true
+
+[broadcast.contentDetails.monitorStream]
+enableMonitorStream = true
+broadcastStreamDelayMs = 0
+
+[stream.cdn]
+ingestionType = "rtmp"
+resolution = "1080p"
+frameRate = "30fps"

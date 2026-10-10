@@ -1,0 +1,48 @@
+{#- YouTube description for each broadcast.
+    Available: event (ics Event), start_sast, end_sast (arrow datetimes). -#}
+{{ event.name }}
+
+{{ start_sast.format("dddd D MMMM YYYY") }}, {{ start_sast.format("HH:mm") }} - {{ end_sast.format("HH:mm") }} (SAST)
+{%- if event.location %}
+Room: {{ event.location }}
+{%- endif %}
+{%- if event.description %}
+
+{{ event.description }}
+{%- endif %}
+{%- if event.url %}
+
+Schedule: {{ event.url }}
+{%- endif %}
+
+
+See more at: https://za.pycon.org/
+
+Sponsors
+========
+This video was made possible by our generous sponsors:
+
+Platinum Sponsors:
+Thinkst Canary: https://canary.tools/
+
+Gold Sponsors:
+NITheCS: https://nithecs.ac.za/
+
+Silver Sponsors:
+OfferZen: https://www.offerzen.com/?utm_campaign=za-demand-engagement-community-all-demand-personas-oz-sponsored-conferences-q4&utm_content=pycon-za&utm_source=event
+
+Patron Sponsors:
+afrolabs: https://afrolabs.co.za/
+CoderLevelUp: https://coderlevelup.org/
+ESP: https://esp.info/
+isazi.ai: https://www.isazi.ai/
+Naughty Bean Coffee: https://naughtybean.coffee/
+
+Bus Factor Sponsors:
+SerpAPI: https://www.serpapi.com/?utm=pyconza
+
+
+Socials
+=======
+Twitter: https://twitter.com/pyconza
+Mastodon: https://fosstodon.org/@pyconza

@@ -1,0 +1,5 @@
+{#- Rendered per schedule event. Must be unique per talk and friendly to the
+    bot's to_discord_title_safe() (lowercase, alphanumerics + dashes), because
+    the broadcast title becomes the Discord channel name.
+    Available: event (ics Event), start_sast, end_sast (arrow datetimes). -#}
+{{ event.name }}
