@@ -105,13 +105,16 @@ class WaferSync(commands.Cog):
         for event in events:
             channel_title = to_discord_title_safe(event.name)
             channel = get(server_info.guild.channels, name=channel_title)
-            channel_mention = (
-                "it's discord channel" if channel is None else channel.mention
-            )
+            if channel is None:
+                await log(
+                    f"Skipping announcement for `{event.name}`: "
+                    f"no discord channel named `{channel_title}` found."
+                )
+                continue  # Don't announce or mark as announced.
             await server_info.announcement_channel.send(
                 f"The event **{event.name}** is happening in "
                 f"{WAFER_UPCOMING_EVENTS_BOUNDARY_MINUTES} minutes!\n"
-                f"Please go to {channel_mention} to watch it."
+                f"Please go to {channel.mention} to watch it."
             )
             await mark_as_announced(event)
 
