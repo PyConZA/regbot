@@ -1,10 +1,13 @@
 """Create YouTube live broadcasts and streams from the Wafer schedule.
 
-Creates one live broadcast and one dedicated live stream per talk event in the
-Wafer schedule ICS feed, binds them together, and adds each broadcast to the
-playlist that the bot reads (YOUTUBE_PLAYLIST). Re-running is safe: a state
-file maps Wafer event UIDs to the created YouTube resources, so only new or
-changed events are touched.
+Talk data (title, abstract, acceptance status) comes from the Wafer talks
+API; the schedule ICS feed supplies the start/end times, room names, and
+event UIDs, because the API does not expose slot or venue details. Creates
+one live broadcast and one dedicated live stream per accepted talk (and per
+non-talk schedule entry not excluded in the TOML filter), binds them
+together, and adds each broadcast to the playlist that the bot reads
+(YOUTUBE_PLAYLIST). Re-running is safe: a state file maps Wafer event UIDs
+to the created YouTube resources, so only new or changed events are touched.
 
 Usage (from the project root):
 
@@ -14,10 +17,15 @@ Usage (from the project root):
     # Create / update broadcasts and write the stream-keys CSV:
     uv run python regbot/scripts/create_youtube_broadcasts.py
 
+    # Only create the first three talks, to test the pipeline end-to-end
+    # (clean up afterwards with --reset):
+    uv run python regbot/scripts/create_youtube_broadcasts.py --test-run
+
     # Delete everything previously created (asks for confirmation):
     uv run python regbot/scripts/create_youtube_broadcasts.py --reset
 
-Environment (dry-run): WAFER_BASE_URL, WAFER_ICS_ENDPOINT.
+Environment (dry-run): WAFER_BASE_URL, WAFER_ICS_ENDPOINT,
+WAFER_TALKS_ENDPOINT, WAFER_USERNAME, WAFER_PASSWORD.
 Environment (full run): the full bot environment, because the OAuth helper is
 reused from regbot.google (which reads the Google and, via regbot.helpers,
 Discord envars at import time), plus YOUTUBE_PLAYLIST. A valid
@@ -29,18 +37,21 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import os
+import re
 import sys
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
 
 import arrow
 import httpx
 from googleapiclient.errors import HttpError
-from ics import Calendar, Event
+from ics import Calendar
 from jinja2 import Environment, FileSystemLoader
 
 SCRIPT_DIR = Path(__file__).parent
@@ -83,15 +94,97 @@ def get_youtube_service():
     )
 
 
-def fetch_schedule_events() -> list[Event]:
-    """Fetch the Wafer schedule ICS feed and return all events, sorted by start."""
-    ics_url = urljoin(get_str_env("WAFER_BASE_URL"), get_str_env("WAFER_ICS_ENDPOINT"))
+TALK_URL_RE = re.compile(r"^/talks/(\d+)-")
+WAFER_RATE_LIMIT_PAUSE_SECONDS = 1.5
+
+
+@dataclass
+class ScheduleEvent:
+    """A Wafer schedule entry.
+
+    Times, room, and UID come from the ICS feed (the Wafer API does not
+    expose slots or venues); talk title, abstract, and acceptance status
+    come from the Wafer talks API.
+    """
+
+    uid: str
+    name: str
+    begin: arrow.Arrow
+    end: arrow.Arrow
+    location: str | None
+    description: str | None
+    url: str
+    is_talk: bool
+    accepted: bool
+
+
+def fetch_wafer_talks() -> dict[int, dict]:
+    """Fetch all talks from the Wafer talks API, keyed by talk id."""
+    auth = (get_str_env("WAFER_USERNAME"), get_str_env("WAFER_PASSWORD"))
+    url: str | None = urljoin(
+        get_str_env("WAFER_BASE_URL"), get_str_env("WAFER_TALKS_ENDPOINT")
+    )
+    talks: dict[int, dict] = {}
+    while url:
+        response = httpx.get(url, auth=auth, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        for talk in data["results"]:
+            talks[talk["talk_id"]] = talk
+        url = data["next"]
+        if url:
+            # PyConZA's Wafer host is prone to network errors without this.
+            time.sleep(WAFER_RATE_LIMIT_PAUSE_SECONDS)
+    return talks
+
+
+def clean_abstract(abstract: str) -> str:
+    """Convert a Wafer talk abstract (HTML-ish) to YouTube-friendly plain text."""
+    text = re.sub(r"(?i)<br\s*/?>", "\n", abstract)
+    text = re.sub(r"(?i)</p>\s*<p[^>]*>", "\n\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(text).replace("\r\n", "\n").strip()
+
+
+def fetch_schedule_events(talks: dict[int, dict]) -> list[ScheduleEvent]:
+    """Fetch the schedule ICS feed and enrich its events with API talk data."""
+    base_url = get_str_env("WAFER_BASE_URL")
+    ics_url = urljoin(base_url, get_str_env("WAFER_ICS_ENDPOINT"))
     response = httpx.get(ics_url, timeout=30)
     response.raise_for_status()
-    return sorted(Calendar(response.text).events, key=lambda event: event.begin)
+    ics_events = sorted(Calendar(response.text).events, key=lambda event: event.begin)
+    events = []
+    for ics_event in ics_events:
+        match = TALK_URL_RE.match(ics_event.url or "")
+        talk = talks.get(int(match.group(1))) if match else None
+        if match:
+            # A scheduled talk: the API is authoritative for title/abstract.
+            # If it is missing from the API, fall back to the ICS data and
+            # assume acceptance (Wafer only schedules accepted talks).
+            name = talk["title"] if talk else ics_event.name
+            description = clean_abstract(talk["abstract"]) if talk else None
+            accepted = talk["status"] == "A" if talk else True
+        else:
+            name = ics_event.name
+            description = None
+            accepted = True
+        events.append(
+            ScheduleEvent(
+                uid=ics_event.uid,
+                name=name,
+                begin=ics_event.begin,
+                end=ics_event.end,
+                location=ics_event.location,
+                description=description,
+                url=urljoin(base_url, ics_event.url or ""),
+                is_talk=match is not None,
+                accepted=accepted,
+            )
+        )
+    return events
 
 
-def render_snippet(jinja_env: Environment, event: Event) -> dict:
+def render_snippet(jinja_env: Environment, event: ScheduleEvent) -> dict:
     """Render the title and description templates for an event into an API snippet."""
     context = {
         "event": event,
@@ -159,7 +252,7 @@ def update_broadcast(youtube, entry: dict, snippet: dict) -> None:
 
 
 def create_for_event(
-    youtube, config: dict, playlist_id: str, snippet: dict, event: Event
+    youtube, config: dict, playlist_id: str, snippet: dict, event: ScheduleEvent
 ) -> dict:
     """Create and bind a broadcast and stream for one event, and playlist it."""
     broadcast = create_broadcast(youtube, config, snippet)
@@ -223,7 +316,7 @@ def write_keys_csv(path: Path, state: dict) -> None:
 
 
 def plan_event(
-    event: Event,
+    event: ScheduleEvent,
     state: dict,
     config: dict,
     jinja_env: Environment,
@@ -231,9 +324,17 @@ def plan_event(
     now: arrow.Arrow,
 ) -> tuple[str, dict | None]:
     """Decide what to do with an event. Returns (action, snippet or None)."""
-    name = event.name.lower()
-    if any(keyword in name for keyword in config["filter"]["exclude_keywords"]):
-        return "SKIP (filtered)", None
+    if event.is_talk:
+        # Talks are filtered by their Wafer acceptance status, not by name.
+        if not event.accepted:
+            return "SKIP (not accepted)", None
+    else:
+        name = event.name.strip().lower()
+        excluded = {
+            event_name.lower() for event_name in config["filter"]["exclude_events"]
+        }
+        if name in excluded:
+            return "SKIP (filtered)", None
     if not include_past and event.end < now:
         return "SKIP (past)", None
     snippet = render_snippet(jinja_env, event)
@@ -242,6 +343,32 @@ def plan_event(
     if needs_update(state[event.uid], snippet):
         return "UPDATE", snippet
     return "UNCHANGED", snippet
+
+
+def plan_actions(
+    events: list[ScheduleEvent],
+    state: dict,
+    config: dict,
+    jinja_env: Environment,
+    include_past: bool,
+    test_run: bool,
+) -> list[tuple[ScheduleEvent, str, dict | None]]:
+    """Plan the action for every event, narrowing to a test batch if asked."""
+    now = arrow.utcnow()
+    planned = [
+        (event, *plan_event(event, state, config, jinja_env, include_past, now))
+        for event in events
+    ]
+    if not test_run:
+        return planned
+    actionable = [
+        (event, action, snippet)
+        for event, action, snippet in planned
+        if event.is_talk and action in ("CREATE", "UPDATE")
+    ]
+    planned = actionable[:3]
+    print(f"Test run: limited to the first {len(planned)} actionable talks.")
+    return planned
 
 
 def reset(state: dict, assume_yes: bool) -> int:
@@ -297,6 +424,12 @@ def main() -> int:
         help="Also process events that have already ended.",
     )
     parser.add_argument(
+        "--test-run",
+        action="store_true",
+        help="Only process the first three actionable talks, so a botched run "
+        "is easy to clean up with --reset.",
+    )
+    parser.add_argument(
         "--config", type=Path, default=SCRIPT_DIR / "youtube_template.toml"
     )
     parser.add_argument("--state", type=Path, default=SCRIPT_DIR / ".youtube_state.json")
@@ -310,7 +443,8 @@ def main() -> int:
         loader=FileSystemLoader(SCRIPT_DIR),
         autoescape=False,  # noqa: S701 (plain text for YouTube, not HTML)
     )
-    events = fetch_schedule_events()
+    talks = fetch_wafer_talks()
+    events = fetch_schedule_events(talks)
     state = load_state(args.state)
 
     if args.reset:
@@ -320,11 +454,9 @@ def main() -> int:
             write_keys_csv(args.keys_csv, {})
         return result
 
-    now = arrow.utcnow()
-    planned = [
-        (event, *plan_event(event, state, config, jinja_env, args.include_past, now))
-        for event in events
-    ]
+    planned = plan_actions(
+        events, state, config, jinja_env, args.include_past, args.test_run
+    )
 
     for event, action, snippet in planned:
         start = event.begin.to(DISPLAY_TIMEZONE).format("ddd D MMM HH:mm")

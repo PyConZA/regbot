@@ -85,21 +85,28 @@ Then start the server with
 ## YouTube broadcast setup script
 
 `regbot/scripts/create_youtube_broadcasts.py` creates one YouTube live
-broadcast and one dedicated live stream per talk from the Wafer schedule ICS
-feed, binds them, and adds each broadcast to `YOUTUBE_PLAYLIST` (the playlist
-the bot reads). Per-talk settings live in `regbot/scripts/youtube_template.toml`,
-and the title/description text in `regbot/scripts/title.j2` /
-`description.j2`. A state file (`.youtube_state.json`) makes re-runs
+broadcast and one dedicated live stream per accepted talk from the Wafer
+talks API (using the schedule ICS feed for times and room names, which the
+API does not expose), binds them, and adds each broadcast to
+`YOUTUBE_PLAYLIST` (the playlist the bot reads). Per-talk settings live in
+`regbot/scripts/youtube_template.toml`, and the title/description text in
+`regbot/scripts/title.j2` / `description.j2` (the description includes the
+talk abstract). A state file (`.youtube_state.json`) makes re-runs
 idempotent: changed talks are updated, new talks created.
 
 ```bash
-# See what would be created (needs only WAFER_BASE_URL / WAFER_ICS_ENDPOINT):
+# See what would be created (needs the Wafer envars: WAFER_BASE_URL,
+# WAFER_ICS_ENDPOINT, WAFER_TALKS_ENDPOINT, WAFER_USERNAME, WAFER_PASSWORD):
 uv run python regbot/scripts/create_youtube_broadcasts.py --dry-run
 
 # Create / update broadcasts and write youtube_stream_keys.csv for the
 # streaming team (needs the full bot environment incl. YOUTUBE_PLAYLIST and
 # a valid .google_client_credentials in the current directory):
 uv run python regbot/scripts/create_youtube_broadcasts.py
+
+# Only create the first three talks, to test the pipeline end-to-end
+# (clean up afterwards with --reset):
+uv run python regbot/scripts/create_youtube_broadcasts.py --test-run
 
 # Delete everything previously created:
 uv run python regbot/scripts/create_youtube_broadcasts.py --reset

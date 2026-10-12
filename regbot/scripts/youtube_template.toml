@@ -2,9 +2,11 @@
 # create_youtube_broadcasts.py. Edit values here; no code changes needed.
 
 [filter]
-# Schedule events whose name contains any of these (case-insensitive) are
-# skipped. Check `--dry-run` output against the real Wafer schedule and adjust.
-exclude_keywords = ["break", "lunch", "tea", "registration"]
+# Talks are filtered by their Wafer acceptance status, not by name. This list
+# only applies to non-talk schedule entries (pages such as breaks): those
+# with exactly these names (case-insensitive) are skipped. Whole names, not
+# substrings. Check `--dry-run` output against the real schedule and adjust.
+exclude_events = ["break", "lunch", "tea / coffee", "registration"]
 
 [broadcast.status]
 # "public", "unlisted" or "private". Start unlisted/private and flip to public

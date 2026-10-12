@@ -1,5 +1,6 @@
-{#- YouTube description for each broadcast.
-    Available: event (ics Event), start_sast, end_sast (arrow datetimes). -#}
+{#- YouTube description for each broadcast. event.description is the talk
+    abstract (plain text) for talks, None for other schedule entries.
+    Available: event (ScheduleEvent), start_sast, end_sast (arrow datetimes). -#}
 {{ event.name }}
 
 {{ start_sast.format("dddd D MMMM YYYY") }}, {{ start_sast.format("HH:mm") }} - {{ end_sast.format("HH:mm") }} (SAST)
